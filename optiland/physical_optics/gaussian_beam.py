@@ -16,6 +16,8 @@ References:
     1. A. E. Siegman, Lasers (University Science Books, 1986). Gaussian beams:
        chapters 16 and 17. Gaussian beams in ABCD systems: chapter 20.
        Resonator eigenmodes: chapter 21.
+
+Andrei Utina, 2026
 """
 
 from __future__ import annotations

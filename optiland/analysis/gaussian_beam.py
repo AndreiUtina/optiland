@@ -8,6 +8,8 @@ surface, the Gouy phase gained along the way, and plots the beam envelope.
 References:
     1. A. E. Siegman, Lasers (University Science Books, 1986). Ray matrices:
        chapter 15. Gaussian beams in ABCD systems: chapter 20.
+
+Andrei Utina, 2026
 """
 
 from __future__ import annotations
