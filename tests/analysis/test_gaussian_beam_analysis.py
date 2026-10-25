@@ -275,6 +275,51 @@ def test_astigmatic_fold_warns(set_test_backend):
         GaussianBeamAnalysis(oblique_powered_mirror(), beam)
 
 
+def singlet(surface_type="standard", **front):
+    """N-BK7 singlet whose front surface is spherical, toroidal or biconic."""
+    optic = Optic()
+    optic.surfaces.add(index=0, radius=be.inf, thickness=be.inf)
+    optic.surfaces.add(
+        index=1,
+        surface_type=surface_type,
+        thickness=5.0,
+        material="N-BK7",
+        is_stop=True,
+        **front,
+    )
+    optic.surfaces.add(index=2, radius=be.inf, thickness=100.0)
+    optic.surfaces.add(index=3)
+    return _finish(optic)
+
+
+@pytest.mark.parametrize("surface_type", ["toroidal", "biconic"])
+@pytest.mark.parametrize(
+    ("radius_x", "radius_y"),
+    [(51.68, 60.0), (51.68, be.inf), (be.inf, 51.68)],
+)
+def test_surface_with_different_xy_radii_raises(
+    set_test_backend, surface_type, radius_x, radius_y
+):
+    # The first-order engine keeps one of the two radii, so a rotationally
+    # symmetric beam would silently describe one plane only.
+    beam = GaussianBeam.from_waist(1.0, wavelength=WAVELENGTH)
+    optic = singlet(surface_type, radius_x=radius_x, radius_y=radius_y)
+    with pytest.raises(UnsupportedParaxialGeometryError, match="ANAMORPHIC_SURFACE"):
+        GaussianBeamAnalysis(optic, beam)
+
+
+@pytest.mark.parametrize("surface_type", ["toroidal", "biconic"])
+def test_surface_with_equal_xy_radii_matches_sphere(set_test_backend, surface_type):
+    # Equal radii make the surface a sphere, which the analysis accepts.
+    beam = GaussianBeam.from_waist(1.0, wavelength=WAVELENGTH)
+    sphere = GaussianBeamAnalysis(singlet(radius=51.68), beam).beam_at(-1, "before")
+    out = GaussianBeamAnalysis(
+        singlet(surface_type, radius_x=51.68, radius_y=51.68), beam
+    ).beam_at(-1, "before")
+    assert_allclose(out.q_real, sphere.q_real, rtol=1e-12, atol=1e-12)
+    assert_allclose(out.q_imag, sphere.q_imag, rtol=1e-12, atol=1e-12)
+
+
 def test_beam_at_validates_arguments(set_test_backend):
     beam = GaussianBeam.from_waist(1.0, -50.0, wavelength=WAVELENGTH)
     analysis = GaussianBeamAnalysis(thin_lens(), beam)

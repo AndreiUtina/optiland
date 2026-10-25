@@ -55,7 +55,8 @@ beam radii are 1/e² intensity radii.
 
 ``GaussianBeamAnalysis`` (see :doc:`analysis/analysis.gaussian_beam`) carries a
 beam through an optical system with its ray-transfer (ABCD) matrices, including
-systems folded by plane mirrors::
+systems folded by plane mirrors. Because the beam is rotationally symmetric,
+surfaces with different radii in x and y (toroidal, biconic) raise an error::
 
    from optiland.analysis import GaussianBeamAnalysis
    from optiland.physical_optics import GaussianBeam

@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import optiland.backend as be
+from optiland.geometries import BiconicGeometry, ToroidalGeometry
+from optiland.paraxial_path import UnsupportedParaxialGeometryError
 
 from .base import BaseAnalysis
 
@@ -27,6 +29,15 @@ if TYPE_CHECKING:
 
     from optiland.optic import Optic
     from optiland.physical_optics.gaussian_beam import GaussianBeam
+
+
+ANAMORPHIC_SURFACE = "ANAMORPHIC_SURFACE"
+
+
+def _curvature(radius):
+    """Curvature 1/R, zero for a flat (infinite or zero) radius."""
+    radius = be.array(radius)
+    return be.where(be.isinf(radius) | (radius == 0), 0.0, 1.0 / radius)
 
 
 class GaussianBeamAnalysis(BaseAnalysis):
@@ -44,8 +55,10 @@ class GaussianBeamAnalysis(BaseAnalysis):
 
     Raises:
         UnsupportedParaxialGeometryError: If the system is outside the
-            first-order engine's domain. A powered mirror at oblique incidence
-            only gives a ``ParaxialDomainWarning``, because its astigmatism is
+            first-order engine's domain, or if a surface has different radii
+            in x and y (a toroidal or biconic surface), because the beam is
+            rotationally symmetric. A powered mirror at oblique incidence only
+            gives a ``ParaxialDomainWarning``, because its astigmatism is
             ignored.
     """
 
@@ -62,6 +75,7 @@ class GaussianBeamAnalysis(BaseAnalysis):
                 phase gained since surface 1 in radians, and ``"z"`` the
                 unfolded distance from surface 1 in mm.
         """
+        self._check_rotational_symmetry()
         wavelength = self.beam.wavelength
         path = self.optic.surfaces.build_paraxial_path()
         positions = be.ravel(path.axial_positions)
@@ -101,6 +115,37 @@ class GaussianBeamAnalysis(BaseAnalysis):
             data["gouy_phase"].append(gouy)
             data["z"].append(z)
         return data
+
+    def _check_rotational_symmetry(self) -> None:
+        """Reject surfaces that focus differently in x and y.
+
+        The first-order engine keeps only one of the two radii of a toroidal
+        or biconic surface, so a rotationally symmetric beam would silently
+        describe one plane only.
+
+        Raises:
+            UnsupportedParaxialGeometryError: For the first surface whose x
+                and y curvatures differ.
+        """
+        for k in range(1, self.optic.surfaces.num_surfaces):
+            geometry = self.optic.surfaces[k].geometry
+            if isinstance(geometry, ToroidalGeometry):
+                radius_x, radius_y = geometry.R_rot, geometry.R_yz
+            elif isinstance(geometry, BiconicGeometry):
+                radius_x, radius_y = geometry.Rx, geometry.Ry
+            else:
+                continue
+            if not bool(be.allclose(_curvature(radius_x), _curvature(radius_y))):
+                name = type(geometry).__name__
+                rx = float(be.to_numpy(radius_x))
+                ry = float(be.to_numpy(radius_y))
+                raise UnsupportedParaxialGeometryError(
+                    f"[{ANAMORPHIC_SURFACE}] surface {k}: the {name} "
+                    f"has different radii in x ({rx:g} mm) and y ({ry:g} mm), "
+                    "so it focuses differently in the two planes. "
+                    "GaussianBeamAnalysis models rotationally symmetric beams "
+                    "only; use real ray tracing for this system."
+                )
 
     def beam_at(self, surface_number: int, side: str = "after") -> GaussianBeam:
         """Return the beam at a surface.
