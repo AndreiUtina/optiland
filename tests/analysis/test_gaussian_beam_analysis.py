@@ -9,6 +9,7 @@ import pytest
 
 import optiland.backend as be
 from optiland.analysis import GaussianBeamAnalysis
+from optiland.materials import IdealMaterial
 from optiland.optic import Optic
 from optiland.paraxial_path import (
     ParaxialDomainWarning,
@@ -337,6 +338,50 @@ def test_view(set_test_backend):
     assert fig is not None
     assert len(ax.lines) >= 2
     plt.close(fig)
+
+
+def test_view_draws_into_an_existing_figure(set_test_backend):
+    beam = GaussianBeam.from_waist(1.0, -50.0, wavelength=WAVELENGTH)
+    existing = plt.figure()
+    fig, ax = GaussianBeamAnalysis(thin_lens(), beam).view(fig_to_plot_on=existing)
+    assert fig is existing
+    assert len(ax.lines) >= 2
+    plt.close(fig)
+
+
+def test_view_shows_a_new_figure(set_test_backend, monkeypatch):
+    shown = []
+    monkeypatch.setattr(plt, "show", lambda: shown.append(True))
+    beam = GaussianBeam.from_waist(1.0, -50.0, wavelength=WAVELENGTH)
+    fig, _ = GaussianBeamAnalysis(thin_lens(), beam).view()
+    assert shown == [True]
+    plt.close(fig)
+
+
+def test_view_without_legs_draws_an_empty_envelope(set_test_backend):
+    # Object and image only: no leg between surfaces, so nothing to sample.
+    optic = Optic()
+    optic.surfaces.add(index=0, thickness=10.0)
+    optic.surfaces.add(index=1, is_stop=True)
+    beam = GaussianBeam.from_waist(1.0, wavelength=WAVELENGTH)
+    fig, ax = GaussianBeamAnalysis(_finish(optic), beam).view(show=False)
+    assert all(len(line.get_xdata()) == 0 for line in ax.lines[:2])
+    plt.close(fig)
+
+
+def test_input_beam_is_reexpressed_in_object_space_medium(set_test_backend):
+    # A beam given in air entering water object space keeps its waist; its
+    # Rayleigh range grows by the refractive index.
+    optic = Optic()
+    optic.surfaces.add(index=0, thickness=be.inf, material=IdealMaterial(n=1.33))
+    optic.surfaces.add(index=1, radius=be.inf, thickness=10.0, is_stop=True)
+    optic.surfaces.add(index=2)
+    beam = GaussianBeam.from_waist(1.0, 0.0, wavelength=WAVELENGTH)
+    inside = GaussianBeamAnalysis(_finish(optic), beam).beam_at(1, "before")
+    assert_allclose(inside.refractive_index, 1.33)
+    assert_allclose(inside.waist_radius, 1.0)
+    assert_allclose(inside.waist_position, 0.0, atol=1e-12)
+    assert_allclose(inside.rayleigh_range, 1.33 * beam.rayleigh_range)
 
 
 def _two_lens(separation):
