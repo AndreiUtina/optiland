@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 import optiland.backend as be
@@ -119,10 +120,86 @@ def test_from_round_trip_rejects_unstable_or_open_matrices(set_test_backend):
         GaussianBeam.from_round_trip(
             _round_trip(1000.0, 400.0, 400.0), wavelength=WAVELENGTH
         )
-    with pytest.raises(ValueError, match="det = 1"):
-        GaussianBeam.from_round_trip(
-            be.array([[1.0, 0.0], [0.0, 0.5]]), wavelength=WAVELENGTH
+    for det in (0.5, 1.001):
+        with pytest.raises(ValueError, match="det = 1"):
+            GaussianBeam.from_round_trip(
+                be.array([[1.0, 0.0], [0.0, det]]), wavelength=WAVELENGTH
+            )
+
+
+@pytest.fixture
+def float32(set_test_backend):
+    """Run a test in float32, the default precision of the PyTorch backend."""
+    be.set_precision("float32")
+    yield
+    be.set_precision("float64")
+
+
+def test_from_round_trip_symmetric_cavity_float32(float32):
+    length, radius = 1000.0, 1500.0
+    mode = GaussianBeam.from_round_trip(
+        _round_trip(length, radius, radius), wavelength=WAVELENGTH
+    )
+    assert be.to_numpy(mode.q_imag).dtype == np.float32
+    assert_allclose(mode.waist_position, length / 2, rtol=1e-6)
+    assert_allclose(
+        mode.rayleigh_range, math.sqrt(length * (2 * radius - length)) / 2, rtol=1e-6
+    )
+
+
+def test_from_round_trip_accepts_large_entries_in_float32(float32):
+    # Moving the reference plane of a cavity by `shift` gives another valid
+    # round trip, P(shift) M P(-shift), with determinant exactly 1 and entries
+    # near 1e7. Its eigenmode is the original one propagated by `shift`.
+    length, radius, shift = 1000.0, 1500.0, 1e5
+
+    def space(d):
+        return np.array([[1.0, d], [0.0, 1.0]])
+
+    def mirror(r):
+        return np.array([[1.0, 0.0], [-2.0 / r, 1.0]])
+
+    cavity = mirror(radius) @ space(length) @ mirror(radius) @ space(length)
+    moved = space(shift) @ cavity @ space(-shift)
+    matrix = be.array(moved)  # every entry rounded once to float32
+
+    # Rounding alone moves the determinant far beyond an absolute 1e-6 (the
+    # determinant of the rounded entries, computed exactly in float64).
+    a, b, c, d = be.to_numpy(matrix).astype(np.float64).ravel()
+    assert abs(a * d - b * c - 1) > 1e-4
+
+    mode = GaussianBeam.from_round_trip(matrix, wavelength=WAVELENGTH)
+    expected = GaussianBeam.from_round_trip(
+        be.array(cavity), wavelength=WAVELENGTH
+    ).propagate(shift)
+    assert_allclose(mode.q_real, expected.q_real, rtol=1e-6)
+    assert_allclose(mode.q_imag, expected.q_imag, rtol=1e-4)
+
+
+def test_from_round_trip_rejects_change_of_medium_in_float32(float32):
+    for det in (0.5, 1.001):
+        with pytest.raises(ValueError, match="det = 1"):
+            GaussianBeam.from_round_trip(
+                be.array([[1.0, 0.0], [0.0, det]]), wavelength=WAVELENGTH
+            )
+
+
+def test_overlap_rejects_other_wavelength_or_medium(set_test_backend):
+    beam = GaussianBeam.from_waist(0.1, wavelength=WAVELENGTH)
+    with pytest.raises(ValueError, match="same wavelength"):
+        beam.overlap(GaussianBeam.from_waist(0.1, wavelength=0.532))
+    with pytest.raises(ValueError, match="same medium"):
+        beam.overlap(
+            GaussianBeam.from_waist(0.1, wavelength=WAVELENGTH, refractive_index=1.5)
         )
+
+
+def test_repr(set_test_backend):
+    beam = GaussianBeam.from_waist(0.5, 10.0, wavelength=WAVELENGTH)
+    assert repr(beam) == (
+        "GaussianBeam(w=0.500046 mm, w0=0.5 mm, waist at +10 mm, "
+        "wavelength=1.064 µm, m2=1.0)"
+    )
 
 
 def test_with_refractive_index_keeps_waist(set_test_backend):

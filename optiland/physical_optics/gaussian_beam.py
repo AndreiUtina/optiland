@@ -23,6 +23,14 @@ Andrei Utina, 2026
 from __future__ import annotations
 
 import optiland.backend as be
+from optiland.utils import machine_eps
+
+# Round-off allowed in the determinant of a round-trip matrix, as a multiple
+# of the machine epsilon times |A D| + |B C| (the size of the two products
+# whose difference is the determinant). Real round trips, including float32
+# chains with entries of order 1e4, stay within 1 eps; 64 follows the
+# convention of ``optiland.utils.RCOND_EPS_MULTIPLIER``.
+DETERMINANT_EPS_MULTIPLIER = 64.0
 
 
 class GaussianBeam:
@@ -123,7 +131,12 @@ class GaussianBeam:
         """
         A, B = matrix[0][0], matrix[0][1]
         C, D = matrix[1][0], matrix[1][1]
-        if not bool(be.all(be.abs(A * D - B * C - 1) < 1e-6)):
+        # The determinant is 1 up to round-off, which grows with the size of
+        # the products A D and B C and with the working precision.
+        det = A * D - B * C
+        scale = be.abs(A * D) + be.abs(B * C)
+        tolerance = DETERMINANT_EPS_MULTIPLIER * machine_eps(det) * scale
+        if not bool(be.all(be.abs(det - 1) <= tolerance)):
             raise ValueError(
                 "a round trip must start and end in the same medium (det = 1)."
             )
